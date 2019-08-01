@@ -90,7 +90,7 @@ class DSAC(nn.Module):
         # select three random points
         #print(x,y,z)
         flag = 1
-        tries = 10
+        tries = 100
         plane_num = hyps
         while flag:
             tries = tries-1
@@ -295,21 +295,21 @@ class DSAC(nn.Module):
             
             pts = prediction[b]
             #print(pts)
-            index = torch.nonzero(pts)
+            # index = torch.nonzero(pts)
 
-            #index = index[:,0].view(-1,3)[:,0]
+            # #index = index[:,0].view(-1,3)[:,0]
 
-            if index.size(0)%3==0:
-                index = index[:,0].view(-1,3)[:,0]
-            else:
-                offset = torch.zeros(3-index.size(0)%3,2).long().cuda()
-                index=torch.cat((index,offset),0)
-                index = index[:,0].view(-1,3)[:,0]
-            pts=pts[index,:]
-            #print("出网络的点",pts)
-            if pts.size(0)<4:
-                invalid_size = invalid_size +1
-                continue
+            # if index.size(0)%3==0:
+            #     index = index[:,0].view(-1,3)[:,0]
+            # else:
+            #     offset = torch.zeros(3-index.size(0)%3,2).long().cuda()
+            #     index=torch.cat((index,offset),0)
+            #     index = index[:,0].view(-1,3)[:,0]
+            # pts=pts[index,:]
+            # #print("出网络的点",pts)
+            # if pts.size(0)<4:
+            #     invalid_size = invalid_size +1
+            #     continue
             #x,y,z=torch.split(pts,[1,1,1],1)
             #x=x.view(-1)
             #y=y.view(-1)

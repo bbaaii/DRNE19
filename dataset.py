@@ -272,16 +272,27 @@ class PointcloudPatchDataset(data.Dataset):
         start = 0
         end = point_count
 
-
+        if end >3:
+            valid =1
+        else:
+            valid =0
+        if  end < 64:
+            modelrad = self.patch_radius_absolute[shape_ind]*0.2
+        elif end < 128:
+            modelrad = self.patch_radius_absolute[shape_ind]*0.25
+        elif end < 256:
+            modelrad = self.patch_radius_absolute[shape_ind]*0.3
+        else:
+            modelrad = self.patch_radius_absolute[shape_ind]*0.4 
             # convert points to torch tensors
         
         patch_pts[start:end, :] = torch.from_numpy(shape.pts[patch_point_inds, :])
         patch_pts =patch_pts.cuda()
        
-        #print("转成tensor之后",patch_pts[0:50])
+        # print("转成tensor之后",patch_pts[0:50])
         model=PointnetSAModule(
                 npoint=32,
-                radius=self.patch_radius_absolute[shape_ind]*0.2,
+                radius=modelrad,
                 nsample=16,
                 
                 use_xyz=True,
@@ -303,7 +314,7 @@ class PointcloudPatchDataset(data.Dataset):
        # print(patch_pts)
             # normalize size of patch (scale with 1 / patch radius)
         patch_pts = patch_pts / self.patch_radius_absolute[shape_ind]
-        #print("zhengze之后",patch_pts[:,0])
+        # print("zhengze之后",patch_pts[:,0])
        # print("除半径后")
        # print(patch_pts)
 
@@ -312,7 +323,7 @@ class PointcloudPatchDataset(data.Dataset):
         #print("相匹配的normal")
         #print(patch_normal)
 
-        return (patch_pts,) + (patch_normal,) 
+        return (patch_pts,) + (patch_normal,)+(valid,)
 
 
     def __len__(self):

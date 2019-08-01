@@ -41,7 +41,7 @@ def parse_arguments():
                         'mean: patch mean')
     #parser.add_argument('--patch_point_count_std', type=float, default=0, help='standard deviation of the number of points in a patch')
     parser.add_argument('--patches_per_shape', type=int, default=1000, help='number of patches sampled from each shape in an epoch')
-    parser.add_argument('--workers', type=int, default=1, help='number of data loading workers - 0 means same thread as main execution')
+    parser.add_argument('--workers', type=int, default=0, help='number of data loading workers - 0 means same thread as main execution')
     parser.add_argument('--cache_capacity', type=int, default=100, help='Max. number of dataset elements (usually shapes) to hold in the cache at the same time.')
     parser.add_argument('--seed', type=int, default=3627473, help='manual seed')
     parser.add_argument('--training_order', type=str, default='random', help='order in which the training patches are presented:\n'
@@ -94,7 +94,7 @@ def train_dsacpnet(opt):
     # device = torch.device('cuda:{}'.format(gpu_ids[0]) if torch.cuda.is_available() else 'cpu')
     # 此处如果使用 下面一行代码，则会报错，RuntimeError: all tensors must be on devices[0]
     # 默认情况下 device 为0，因此需要指定 device id.
-    device = torch.device('cuda:{}'.format(1)  if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:{}'.format(0)  if torch.cuda.is_available() else 'cpu')
 
     #if multi_gpus:
        # net = DataParallel(net, device_ids=gpu_ids).to(device)
@@ -245,18 +245,29 @@ def train_dsacpnet(opt):
 
             # set to training mode
             dsac.train()
-
+            index =[]
             # get trainingset batch and upload to GPU
-            points = data[0]
+            points = data[0]#这时的point是64*512*3的类型
             target = data[1]
+            valid = data[2]
+            # for i in range(len(points)):
+            #     if len(torch.nonzero(points[i])) > 256:
+            #         index.append(i)
+            for i in range(len(valid)):
+                if valid[i]:
+                    index.append(i)
 
+            points=points[index]
+            # for point in points:
+            #     print(point)
             points = points.transpose(2, 1)
             points = points.to(device)
-            #print("input",points[0])
+
+            # print("input",points[0])
             #print("input",points.size())
             #print("the points before input")
             #print(points)
-            target = target.to(device)
+            target = target[index].to(device)
 
             # zero gradients
             optimizer.zero_grad()
@@ -293,15 +304,23 @@ def train_dsacpnet(opt):
 
                 test_batchind, data = next(test_enum)
 
-                # get testset batch and upload to GPU
-                points = data[0]
+                index =[]
+                # get trainingset batch and upload to GPU
+                points = data[0]#这时的point是64*512*3的类型
                 target = data[1]
-
+                valid = data[2]
+                # for i in range(len(points)):
+                #     if len(torch.nonzero(points[i])) > 256:
+                #         index.append(i)
+                for i in range(len(valid)):
+                    if valid[i]:
+                        index.append(i)
+                points=points[index]
                 points = points.transpose(2, 1)
                 points = points.to(device)
                 #print("input test",points[0])
                 #print("input test",points.size())
-                target = target.to(device)
+                target = target[index].to(device)
 
                 # forward pass
                 with torch.no_grad():
