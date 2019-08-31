@@ -58,23 +58,28 @@ def parse_arguments():
                         'ms_oneminuscos: mean square 1-cos(angle error)')
 
     # model hyperparameters
-    parser.add_argument('--outputs', type=str, nargs='+', default=['unoriented_normals'], help='outputs of the network, a list with elements of:\n'
-                        'unoriented_normals: unoriented (flip-invariant) point normals\n'
-                        'oriented_normals: oriented point normals\n'
-                        'max_curvature: maximum curvature\n'
-                        'min_curvature: mininum curvature')
+    # parser.add_argument('--outputs', type=str, nargs='+', default=['unoriented_normals'], help='outputs of the network, a list with elements of:\n'
+    #                     'unoriented_normals: unoriented (flip-invariant) point normals\n'
+    #                     'oriented_normals: oriented point normals\n'
+    #                     'max_curvature: maximum curvature\n'
+    #                     'min_curvature: mininum curvature')
     parser.add_argument('--use_point_stn', type=int, default=True, help='use point spatial transformer')
     
     parser.add_argument('--use_feat_stn', type=int, default=True, help='use feature spatial transformer')
     parser.add_argument('--use_mask', type=int, default=True, help='use point mask')
-    #parser.add_argument('--sym_op', type=str, default='max', help='symmetry operation')
-    parser.add_argument('--point_tuple', type=int, default=1, help='use n-tuples of points as input instead of single points')
+    parser.add_argument('--sym_op', type=str, default='max', help='symmetry operation')
+    #parser.add_argument('--point_tuple', type=int, default=1, help='use n-tuples of points as input instead of single points')
     parser.add_argument('--points_per_patch', type=int, default=512, help='max. number of points per patch')
+
+    #RANSAC hyperparameters
+    parser.add_argument('--points_num', '-pnum', type=int, default=32, 
+        help='number of points output form the net')
+
     parser.add_argument('--hypotheses', '-hyps', type=int, default=32, 
-        help='number of line hypotheses sampled for each image')
+        help='number of planes hypotheses sampled for each patch')
 
     parser.add_argument('--inlierthreshold', '-it', type=float, default=0.1, 
-        help='threshold used in the soft inlier count. Its measured in relative image size (1 = image width)')
+        help='threshold used in the soft inlier count. ')
 
     parser.add_argument('--inlieralpha', '-ia', type=float, default=0.5, 
         help='scaling factor for the soft inlier scores (controls the peakiness of the hypothesis distribution)')
@@ -124,11 +129,7 @@ def train_dsacpnet(opt):
         else:
             sys.exit()
 
-    #output_loss_weight =1.0
-    #dsacpnet = DSACPNet(
-     #   num_points=opt.points_per_patch,
 
-      #  )
     criterion = nn.BCEWithLogitsLoss()
     dsac = DSAC(
         opt.hypotheses, 
@@ -139,10 +140,12 @@ def train_dsacpnet(opt):
         opt.seed,device,
         use_point_stn=opt.use_point_stn,
         use_feat_stn=opt.use_feat_stn,
-        use_mask=opt.use_mask
+        use_mask=opt.use_mask,
+        points_num=opt.points_num,
+        points_per_patch=opt.points_per_patch,
+        sym_op=opt.sym_op
         )
-    #distChamfer =  ext.chamferDist()
-    #dsacpnet.to(device)
+
     if opt.seed < 0:
         opt.seed = random.randint(1, 10000)
 
@@ -259,17 +262,11 @@ def train_dsacpnet(opt):
 
             # set to training mode
             dsac.train()
-            #index =[]
-            # get trainingset batch and upload to GPU
+
             points = data[0]#这时的point是64*512*3的类型
             target = data[1]
             mask = data[2]
-            #valid = data[3]
-            
-            # for i in range(len(valid)):
-            #     if valid[i]:
-            #         index.append(i)
-            
+
 
             points=points
             # for point in points:
@@ -277,39 +274,19 @@ def train_dsacpnet(opt):
             points = points.transpose(2, 1)
             points = points.to(device)
             
-            # print("input",points[0])
-            #print("input",points.size())
-            #print("the points before input")
-            #print(points)
-            
             target = target.to(device)
             mask =mask.to(device)
-            
             
             # zero gradients
             optimizer.zero_grad()
 
-            # forward pass
-            #points, _ = dsacpnet(points)
-            #print("after trans")
-            #print(points[0])
-            #with torchsnooper.snoop():
             exp_loss, top_loss,_,pts,mask_p = dsac(
                 points,
                 target
-                #output_loss_weight = output_loss_weight,
-                
-                
             )
-            #dist1, _ = distChamfer(pts, points.transpose(2, 1).contiguous())
-            # print(dist1)
-            # print(pts)
-            # print(points.transpose(2, 1))
-            #chamfer_loss=torch.mean(dist1)
+
             if opt.use_mask:
                 mask_p=mask_p.view(-1,opt.points_per_patch)
-            #mask_loss=(mask-mask_p).pow(2).sum(1).mean()
-            #mask_loss=(mask-mask_p).pow(2).sum(1).mean()*0.01
                 mask_loss=criterion(mask_p, mask)#
             else:mask_loss=0
             exp_loss=exp_loss.mean()
@@ -334,42 +311,22 @@ def train_dsacpnet(opt):
 
                 test_batchind, data = next(test_enum)
 
-                #index =[]
-            # get trainingset batch and upload to GPU
                 points = data[0]#这时的point是64*512*3的类型
                 target = data[1]
                 mask = data[2]
-                #valid = data[3]
-                
-                # for i in range(len(valid)):
-                #     if valid[i]:
-                #         index.append(i)
-            
 
-                points=points
-            # for point in points:
-            #     print(point)
                 points = points.transpose(2, 1)
                 points = points.to(device)
 
-            # print("input",points[0])
-            #print("input",points.size())
-            #print("the points before input")
-            #print(points)
                 target = target.to(device)
                 mask =mask.to(device)
 
                 # forward pass
                 with torch.no_grad():
                     exp_loss, top_loss,_,pts,mask_p = dsac(points,target)
-                #dist1, _ = distChamfer(pts, points.transpose(2, 1).contiguous())
 
-                #chamfer_loss=torch.mean(dist1)
-                
                 if opt.use_mask:
                     mask_p=mask_p.view(-1,opt.points_per_patch)
-            #mask_loss=(mask-mask_p).pow(2).sum(1).mean()
-            #mask_loss=(mask-mask_p).pow(2).sum(1).mean()*0.01
                     mask_loss=criterion(mask_p, mask)#
                 else:mask_loss=0
                 #mask_loss=criterion(mask_p, mask)

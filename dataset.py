@@ -7,7 +7,7 @@ import torch.utils.data as data
 import numpy as np
 import scipy.spatial as spatial
 
-from pointnet2.utils.pointnet2_modules import PointnetSAModule
+
 # do NOT modify the returned points! kdtree uses a reference, not a copy of these points,
 # so modifying the points would make the kdtree give incorrect results
 def load_shape(point_filename, normals_filename,  pidx_filename):
@@ -19,6 +19,7 @@ def load_shape(point_filename, normals_filename,  pidx_filename):
         normals = None
 
 
+
     if pidx_filename != None:
         patch_indices = np.load(pidx_filename+'.npy')
     else:
@@ -27,7 +28,7 @@ def load_shape(point_filename, normals_filename,  pidx_filename):
     sys.setrecursionlimit(int(max(1000, round(pts.shape[0]/10)))) # otherwise KDTree construction may run out of recursions
     kdtree = spatial.cKDTree(pts, 10)
 
-    return Shape(pts=pts, kdtree=kdtree, normals=normals, pidx=patch_indices)
+    return Shape(pts=pts, kdtree=kdtree, normals=normals,  pidx=patch_indices)
 
 class SequentialPointcloudPatchSampler(data.sampler.Sampler):
 
@@ -130,10 +131,11 @@ class RandomPointcloudPatchSampler(data.sampler.Sampler):
 
 
 class Shape():
-    def __init__(self, pts, kdtree, normals=None,  pidx=None):
+    def __init__(self, pts, kdtree, normals=None, curv=None, pidx=None):
         self.pts = pts
         self.kdtree = kdtree
         self.normals = normals
+        self.curv = curv
         self.pidx = pidx # patch center points indices (None means all points are potential patch centers)
 
 
@@ -160,7 +162,7 @@ class Cache():
             self.elements[element_id] = self.loadfunc(self.loader, element_id)
 
         self.used_at[element_id] = self.counter
-        self.counter ==self.counter + 1
+        self.counter += 1
 
         return self.elements[element_id]
 
@@ -168,21 +170,20 @@ class Cache():
 class PointcloudPatchDataset(data.Dataset):
 
     # patch radius as fraction of the bounding box diagonal of a shape
-    def __init__(self, root, shape_list_filename, patch_radius, points_per_patch,
-                 seed=None, identical_epochs=False, center='point',  cache_capacity=1,  sparse_patches=False):
+    def __init__(self, root, shape_list_filename, patch_radius, points_per_patch, 
+                 seed=None, identical_epochs=False,  center='point', cache_capacity=1, sparse_patches=False):
 
         # initialize parameters
         self.root = root
         self.shape_list_filename = shape_list_filename
-
+        
         self.patch_radius = patch_radius
         self.points_per_patch = points_per_patch
         self.identical_epochs = identical_epochs
-
+        
         self.sparse_patches = sparse_patches
         self.center = center
-
-    
+        
         self.seed = seed
 
 
@@ -219,6 +220,8 @@ class PointcloudPatchDataset(data.Dataset):
             np.save(normals_filename+'.npy', normals)
 
 
+
+
             if self.sparse_patches:
                 pidx_filename = os.path.join(self.root, shape_name+'.pidx')
                 patch_indices = np.loadtxt(pidx_filename).astype('int')
@@ -233,8 +236,8 @@ class PointcloudPatchDataset(data.Dataset):
             else:
                 self.shape_patch_count.append(len(shape.pidx))
 
-            bbdiag = float(np.linalg.norm(shape.pts.max(0) - shape.pts.min(0), 2))#对角线
-            self.patch_radius_absolute.append(bbdiag * self.patch_radius[0])#因为在这里我添加的不是list，就只是一个半径的值
+            bbdiag = float(np.linalg.norm(shape.pts.max(0) - shape.pts.min(0), 2))
+            self.patch_radius_absolute.append([bbdiag * rad for rad in self.patch_radius])
 
     # returns a patch centered at the point with the given global index
     # and the ground truth normal the the patch center
@@ -250,93 +253,69 @@ class PointcloudPatchDataset(data.Dataset):
             center_point_ind = shape.pidx[patch_ind]
 
         # get neighboring points (within euclidean distance patch_radius)
-        patch_pts = torch.zeros(self.points_per_patch, 3, dtype=torch.float)#？？？？我不知道为什么要乘个绝对半径,不用乘，就只有一个
+        patch_pts = torch.zeros(self.points_per_patch*len(self.patch_radius_absolute[shape_ind]), 3, dtype=torch.float)
+        point_normals=torch.zeros(self.points_per_patch*len(self.patch_radius_absolute[shape_ind]),3,dtype=torch.float)
         # patch_pts_valid = torch.ByteTensor(self.points_per_patch*len(self.patch_radius_absolute[shape_ind])).zero_()
-        point_normals=torch.zeros(self.points_per_patch,3,dtype=torch.float)
         
-        #for s, rad in enumerate(self.patch_radius_absolute[shape_ind]):
-        patch_point_inds = np.array(shape.kdtree.query_ball_point(shape.pts[center_point_ind, :], self.patch_radius_absolute[shape_ind]))
-        #print("刚取出来的时候")
-        #print(patch_point_inds)
-            # optionally always pick the same points for a given patch index (mainly for debugging)
-        if self.identical_epochs:
-            self.rng.seed((self.seed + index) % (2**32))
+        #scale_ind_range = np.zeros([len(self.patch_radius_absolute[shape_ind]), 2], dtype='int')
+        for s, rad in enumerate(self.patch_radius_absolute[shape_ind]):
+            patch_point_inds = np.array(shape.kdtree.query_ball_point(shape.pts[center_point_ind, :], rad))
 
-        point_count = min(self.points_per_patch, len(patch_point_inds))
+            # optionally always pick the same points for a given patch index (mainly for debugging)
+            if self.identical_epochs:
+                self.rng.seed((self.seed + index) % (2**32))
+
+            point_count = min(self.points_per_patch, len(patch_point_inds))
+
+            # randomly decrease the number of points to get patches with different point densities
+            
 
             # if there are too many neighbors, pick a random subset
-        if point_count < len(patch_point_inds):
-            patch_point_inds = patch_point_inds[self.rng.choice(len(patch_point_inds), point_count, replace=False)]
-        #print("可能被随机减少了一部分后")
-        #print(patch_point_inds)
-        start = 0
-        end = point_count
+            if point_count < len(patch_point_inds):
+                patch_point_inds = patch_point_inds[self.rng.choice(len(patch_point_inds), point_count, replace=False)]
 
+            start = s*self.points_per_patch
+            end = start+point_count
+            #scale_ind_range[s, :] = [start, end]
+
+            #patch_pts_valid += list(range(start, end))
 
             # convert points to torch tensors
-        
-        patch_pts[start:end, :] = torch.from_numpy(shape.pts[patch_point_inds, :])
-        knn=spatial.cKDTree(patch_pts[start:end, :]).query_ball_point(shape.pts[center_point_ind, :], self.patch_radius_absolute[shape_ind]/4)
-        #patch_pts[end:self.points_per_patch,:] =torch.from_numpy(shape.pts[center_point_ind, :])
-        point_normals[start:end, :]=torch.from_numpy(shape.normals[patch_point_inds, :])
-        #point_normals[end:self.points_per_patch,:] =torch.from_numpy(shape.normals[center_point_ind, :])
-        # print(patch_pts[400:512])
-        #print(point_normals[0:100])
-        
+            patch_pts[start:end, :] = torch.from_numpy(shape.pts[patch_point_inds, :])
+            
+            point_normals[start:end, :]=torch.from_numpy(shape.normals[patch_point_inds, :])
+            point_normals[end:end+self.points_per_patch,:] =torch.from_numpy(shape.normals[center_point_ind, :])
+            # center patch (central point at origin - but avoid changing padded zeros)
+            if self.center == 'mean':
+                patch_pts[start:end, :] = patch_pts[start:end, :] - patch_pts[start:end, :].mean(0)
+            elif self.center == 'point':
+                patch_pts[start:end, :] = patch_pts[start:end, :] - torch.from_numpy(shape.pts[center_point_ind, :])
+            elif self.center == 'none':
+                pass # no centering
+            else:
+                raise ValueError('Unknown patch centering option: %s' % (self.center))
 
-        patch_normal = torch.from_numpy(shape.normals[center_point_ind, :])
+            # normalize size of patch (scale with 1 / patch radius)
+            patch_pts[start:end, :] = patch_pts[start:end, :] / rad
+
         
+        patch_normal = torch.from_numpy(shape.normals[center_point_ind, :])
+
 
         mask = (point_normals* patch_normal).sum(1)
-        # print("点乘积")
-        # print(mask)
+
         mask[mask>1] = 1
         mask[mask<-1] = -1
         mask=np.sqrt(np.square(np.rad2deg(np.arccos(mask))))
-        # print("angle")
-        # print(mask)
-        mask[mask<=20] = 1
-        #mask[np.bitwise_and(10<mask,mask<=25)] = 0.5
-        #mask[mask>160] = 1
-        mask[mask>20] = 0
-        
-        
-        
-        
-        
-        #mask[knn]+=0.7
-        mask[end:self.points_per_patch]=1
-        
-        #mask=torch.from_numpy(mask)
-        # print("mask")
-        # print(mask)
-        #patch_pts =patch_pts.cuda()
-       
-        # print("转成tensor之后",patch_pts[0:50])
-        
-        #print("pooling之后",patch_pts[:,0])
-            # center patch (central point at origin - but avoid changing padded zeros)
-        if self.center == 'mean':
-            patch_pts[start:end, :] = patch_pts[start:end, :] - patch_pts.mean(0)
-        elif self.center == 'point':
-            patch_pts[start:end, :] = patch_pts[start:end, :] - torch.from_numpy(shape.pts[center_point_ind, :])#.cuda()
-        elif self.center == 'none':
-            pass # no centering
-        else:
-            raise ValueError('Unknown patch centering option: %s' % (self.center))
-      #  print("减去中心点后")
-       # print(patch_pts)
-            # normalize size of patch (scale with 1 / patch radius)
-        patch_pts[start:end, :] = patch_pts[start:end, :] / self.patch_radius_absolute[shape_ind]
-        # print("zhengze之后",patch_pts[:,0])
-       # print("除半径后")
-        
-        
-        
-        #print("相匹配的normal")
-        #print(patch_normal)
 
-        return (patch_pts,) + (patch_normal,)+(mask,)#+(valid,)
+        mask[mask<=25] = 1
+
+        mask[mask>25] = 0
+
+        
+        
+
+        return (patch_pts,)  + (patch_normal,)+(mask,)
 
 
     def __len__(self):
@@ -361,4 +340,4 @@ class PointcloudPatchDataset(data.Dataset):
         normals_filename = os.path.join(self.root, self.shape_names[shape_ind]+'.normals') 
 
         pidx_filename = os.path.join(self.root, self.shape_names[shape_ind]+'.pidx') if self.sparse_patches else None
-        return load_shape(point_filename, normals_filename,  pidx_filename)
+        return load_shape(point_filename, normals_filename, pidx_filename)

@@ -19,12 +19,12 @@ def parse_arguments():
     parser.add_argument('--indir', type=str, default='/data/pclouds', help='input folder (point clouds)')
     parser.add_argument('--outdir', type=str, default='../../data/results', help='output folder (estimated point cloud properties)')
     #parser.add_argument('--dataset', type=str, default='testset_no_noise.txt', help='shape set file name')
-    parser.add_argument('--dataset', type=str, default='validationset_whitenoise.txt', help='shape set file name')
+    parser.add_argument('--dataset', type=str, default='use_to_draw.txt', help='shape set file name')
     parser.add_argument('--modeldir', type=str, default='../../data/dsacmodelsmask4', help='model folder')
     parser.add_argument('--models', type=str, default='my_single_scale_normalmask4', help='names of trained models, can evaluate multiple models')
-    parser.add_argument('--modelpostfix', type=str, default='_model_1600.pth', help='model file postfix')
+    parser.add_argument('--modelpostfix', type=str, default='_model.pth', help='model file postfix')
     parser.add_argument('--parmpostfix', type=str, default='_params.pth', help='parameter file postfix')
-    parser.add_argument('--gpu_idx', type=int, default=2, help='set < 0 to use CPU')
+    parser.add_argument('--gpu_idx', type=int, default=0, help='set < 0 to use CPU')
 
     parser.add_argument('--sparse_patches', type=int, default=False, help='evaluate on a sparse set of patches, given by a .pidx file containing the patch center point indices.')
     parser.add_argument('--sampling', type=str, default='full', help='sampling strategy, any of:\n'
@@ -105,7 +105,17 @@ def eval_pcpnet(opt):
             batch_size=model_batchSize,
             num_workers=int(opt.workers))
 
-        regressor = DSAC(trainopt.hypotheses, trainopt.inlierthreshold, trainopt.inlierbeta, trainopt.inlieralpha, trainopt.normal_loss,trainopt.seed,device)
+        regressor = DSAC(
+            trainopt.hypotheses,
+            trainopt.inlierthreshold,
+            trainopt.inlierbeta,
+            trainopt.inlieralpha,
+            trainopt.normal_loss,
+            trainopt.seed,device,
+            use_point_stn=trainopt.use_point_stn,
+            use_feat_stn=trainopt.use_feat_stn,
+            use_mask=trainopt.use_mask
+        )
         
         
         
@@ -157,23 +167,23 @@ def eval_pcpnet(opt):
             Y[512+32]+=5
             
             print(top_loss.mean())
-            # for i in range(points.size(0)):
-            # #print("input",x[i].transpose(0,1)[0:100])
-            #     print("predict",i,normal[i])
-            #     print("ground truth",i,data_trans[i])
-            #     print("top_loss_loss",i,top_loss[i],"\n")
-            #     print(mask_t[i])
-            #     print(mask[i].view(-1))
-            #     viz.scatter(
-            #         X=torch.cat((points[i].transpose(0,1),pts[i],torch.zeros(1,3).cuda(2)),0),
-            #         Y=Y,
-            #         opts=dict(
-            #             title = str(i),
-            #         #'legend': ['Men', 'Women'],
-            #             markersize= 2,
-            #         #markercolor=np.random.randint(0, 255, (3, 3,)),
-            #         )
-            #     )
+            for i in range(points.size(0)):
+            #print("input",x[i].transpose(0,1)[0:100])
+                # print("predict",i,normal[i])
+                # print("ground truth",i,data_trans[i])
+                # print("top_loss_loss",i,top_loss[i],"\n")
+                # print(mask_t[i])
+                # print(mask[i].view(-1))
+                viz.scatter(
+                    X=torch.cat((points[i].transpose(0,1),pts[i],torch.zeros(1,3).cuda()),0),
+                    Y=Y,
+                    opts=dict(
+                        title = str(i),
+                    #'legend': ['Men', 'Women'],
+                        markersize= 2,
+                    #markercolor=np.random.randint(0, 255, (3, 3,)),
+                    )
+                )
             # #     # viz.scatter(
             # #     #     X=torch.mul(points[i].transpose(0,1),mask[i]),
                     

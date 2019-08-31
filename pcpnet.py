@@ -200,13 +200,19 @@ class PointNetfeat(nn.Module):
             # self.stn1 = STN(num_scales=self.num_scales, num_points=num_points, dim=3, sym_op=self.sym_op)
             self.stn1 = QSTN(num_scales=self.num_scales, num_points=num_points*self.point_tuple, dim=3, sym_op=self.sym_op)
         if self.use_mask:
-            self.mask = MASK()
+            self.conva = torch.nn.Conv1d(1088, 256, 1)
+            #self.convb = torch.nn.Conv1d(512, 256, 1)
+            self.convc = torch.nn.Conv1d(256, 64, 1)
+            self.convd = torch.nn.Conv1d(64, 1, 1)
+            self.bna = nn.BatchNorm1d(256)
+            #self.bnb = nn.BatchNorm1d(256)
+            self.bnc = nn.BatchNorm1d(64)
         if self.use_feat_stn:
             self.stn2 = STN(num_scales=self.num_scales, num_points=num_points, dim=64, sym_op=self.sym_op)
-        if self.use_mask:
-            self.conv0a = torch.nn.Conv1d(4*self.point_tuple, 64, 1)
-        else:
-            self.conv0a = torch.nn.Conv1d(3*self.point_tuple, 64, 1)
+        # if self.use_mask:
+        #     self.conv0a = torch.nn.Conv1d(4*self.point_tuple, 64, 1)
+        # else:
+        self.conv0a = torch.nn.Conv1d(3*self.point_tuple, 64, 1)
         self.conv0b = torch.nn.Conv1d(64, 64, 1)
         self.bn0a = nn.BatchNorm1d(64)
         self.bn0b = nn.BatchNorm1d(64)
@@ -242,12 +248,12 @@ class PointNetfeat(nn.Module):
         else:
             trans = None
         
-        if self.use_mask:
-            mask = self.mask(x)
+        # if self.use_mask:
+        #     mask = self.mask(x)
             
-            x = torch.cat([x, mask], 1)
-        else:
-            mask=None
+        #     x = torch.cat([x, mask], 1)
+        # else:
+        #     mask=None
             
         x = F.relu(self.bn0a(self.conv0a(x)))
         x = F.relu(self.bn0b(self.conv0b(x)))
@@ -269,8 +275,11 @@ class PointNetfeat(nn.Module):
             
         # mlp (64,128,1024)
         x = F.relu(self.bn1(self.conv1(x)))
+        if self.use_mask:
+            pointfeat = x
+            n_pts = x.size()[2]
         x = F.relu(self.bn2(self.conv2(x)))
-
+        
         
         x = self.bn3(self.conv3(x))
         
@@ -305,12 +314,19 @@ class PointNetfeat(nn.Module):
             x = x_scales
         #x= x.transpose(2,1)
         x = x.contiguous().view(-1, 1024*self.num_scales**2)
-
+        if self.use_mask:
+            x2 = x.view(-1, 1024, 1).repeat(1, 1, n_pts)
+            x2 = torch.cat([x2, pointfeat], 1)
+            x2 = F.relu(self.bna(self.conva(x2)))
+            #x2 = F.relu(self.bnb(self.convb(x2)))
+            x2 = F.relu(self.bnc(self.convc(x2)))
+            mask = self.convd(x2)
+        else:mask = None
         return x, trans, trans2, mask
 
 
 class PCPNet(nn.Module):
-    def __init__(self, num_points=512, output_dim=3*32, use_point_stn=True, use_feat_stn=True, use_mask=True,sym_op='sum', get_pointfvals=False, point_tuple=1):
+    def __init__(self, num_points=512, output_dim=3*32, use_point_stn=True, use_feat_stn=True, use_mask=True,sym_op='max', get_pointfvals=False, point_tuple=1):
         super(PCPNet, self).__init__()
         self.num_points = num_points
 
@@ -344,7 +360,7 @@ class PCPNet(nn.Module):
         return x, trans, trans2, mask
 
 class MSPCPNet(nn.Module):
-    def __init__(self, num_scales=2, num_points=512, output_dim=3, use_point_stn=True, use_feat_stn=True, sym_op='sum', get_pointfvals=False, point_tuple=1):
+    def __init__(self, num_scales=2, num_points=512, output_dim=3, use_point_stn=True, use_feat_stn=True, sym_op='max', get_pointfvals=False, point_tuple=1):
         super(MSPCPNet, self).__init__()
         self.num_points = num_points
 
